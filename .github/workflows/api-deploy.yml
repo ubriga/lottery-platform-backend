@@ -1,0 +1,46 @@
+name: Deploy API Documentation
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'api/**'
+      - 'models/**'
+  workflow_dispatch:
+
+jobs:
+  deploy-docs:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          pip install flask flask-cors flask-jwt-extended
+      
+      - name: Generate API documentation
+        run: |
+          python -c "
+import json
+from models.games import get_all_games
+
+games = get_all_games()
+with open('api-docs.json', 'w', encoding='utf-8') as f:
+    json.dump({'games': games}, f, ensure_ascii=False, indent=2)
+"
+      
+      - name: Commit documentation
+        run: |
+          git config --global user.name 'GitHub Actions Bot'
+          git config --global user.email 'actions@github.com'
+          git add api-docs.json
+          git diff --quiet && git diff --staged --quiet || git commit -m "Update API documentation"
+          git push

@@ -1,0 +1,84 @@
+name: Daily Lottery Data Update
+
+on:
+  # Schedule: Run daily at 3 AM Israel time (1 AM UTC)
+  schedule:
+    - cron: '0 1 * * *'
+  
+  # Allow manual trigger
+  workflow_dispatch:
+    inputs:
+      game_id:
+        description: 'Game ID to update (or "all")'
+        required: false
+        default: 'all'
+      mode:
+        description: 'Update mode'
+        required: false
+        default: 'incremental'
+        type: choice
+        options:
+          - incremental
+          - full
+
+jobs:
+  update-data:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Cache pip dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: Initialize database
+        run: |
+          python scripts/init_db.py
+      
+      - name: Run ETL
+        env:
+          ADMIN_USERNAME: ${{ secrets.ADMIN_USERNAME }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          SECRET_KEY: ${{ secrets.SECRET_KEY }}
+        run: |
+          GAME_ID="${{ github.event.inputs.game_id || 'all' }}"
+          MODE="${{ github.event.inputs.mode || 'incremental' }}"
+          python scripts/etl_runner.py --game "$GAME_ID" --mode "$MODE"
+      
+      - name: Commit and push data
+        run: |
+          git config --global user.name 'GitHub Actions Bot'
+          git config --global user.email 'actions@github.com'
+          git add data/*.db
+          git diff --quiet && git diff --staged --quiet || git commit -m "Auto-update: Lottery data $(date +'%Y-%m-%d %H:%M')"
+          git push
+      
+      - name: Upload database artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: lottery-database
+          path: data/lottery.db
+          retention-days: 30
+      
+      - name: Generate summary
+        run: |
+          echo "## Daily Update Summary" >> $GITHUB_STEP_SUMMARY
+          echo "**Date:** $(date +'%Y-%m-%d %H:%M UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "**Status:** ✅ Completed" >> $GITHUB_STEP_SUMMARY
+          echo "**Mode:** ${{ github.event.inputs.mode || 'incremental' }}" >> $GITHUB_STEP_SUMMARY
